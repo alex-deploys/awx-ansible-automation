@@ -17,11 +17,15 @@ PROJECT_DIR="/home/alazar/acciona/ansible-automatizaciones"
 echo "Instalando dependencias de Ansible..."
 ansible-galaxy collection install -r "$PROJECT_DIR/requirements.yml"
 
+# Cambiar al directorio del proyecto para usar ansible.cfg
+cd "$PROJECT_DIR"
+
 # Ejecutar el playbook
 echo "Ejecutando playbook de escalado automático..."
 ansible-playbook \
-  -i "$PROJECT_DIR/inventory/hosts" \
-  "$PROJECT_DIR/playbooks/azure_serviceplan_autoscaler.yml" \
+  -i "localhost," \
+  -c local \
+  playbooks/azure_serviceplan_autoscaler.yml \
   -e "azure_subscription_id=$AZURE_SUBSCRIPTION_ID" \
   -e "azure_tenant_id=$AZURE_TENANT" \
   -e "azure_client_id=$AZURE_CLIENT_ID" \
