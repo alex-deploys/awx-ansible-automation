@@ -1,0 +1,62 @@
+---
+- name: Automatización para Servidor Remoto
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Test de conectividad inicial
+      ping:
+    
+    - name: Mostrar información del servidor
+      debug:
+        msg: |
+          === INFORMACIÓN DEL SERVIDOR ===
+          Hostname: {{ inventory_hostname }}
+          IP: {{ ansible_default_ipv4.address | default('No disponible') }}
+          Sistema: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Arquitectura: {{ ansible_architecture }}
+          Memoria Total: {{ (ansible_memtotal_mb/1024) | round(1) }} GB
+    
+    - name: Verificar servicios críticos
+      service_facts:
+    
+    - name: Mostrar estado de SSH
+      debug:
+        msg: "SSH: {{ 'Activo' if ansible_facts.services['ssh.service']['state'] == 'running' else 'Inactivo' }}"
+      when: ansible_facts.services['ssh.service'] is defined
+    
+    - name: Verificar espacio en disco (método simple)
+      shell: df -h / | tail -n 1 | awk '{print $4}'
+      register: disk_space
+      changed_when: false
+    
+    - name: Mostrar espacio disponible
+      debug:
+        msg: "Espacio libre en /: {{ disk_space.stdout }}"
+    
+    - name: Verificar carga del sistema
+      debug:
+        msg: "Carga promedio: {{ ansible_loadavg['1m'] }}, {{ ansible_loadavg['5m'] }}, {{ ansible_loadavg['15m'] }}"
+    
+    - name: Crear archivo de prueba AWX
+      copy:
+        content: |
+          === REPORTE DE AUTOMATIZACIÓN AWX ===
+          Servidor: {{ inventory_hostname }}
+          IP: {{ ansible_default_ipv4.address | default('No disponible') }}
+          Sistema: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Fecha ejecución: {{ ansible_date_time.date }}
+          Hora ejecución: {{ ansible_date_time.time }}
+          Usuario AWX: {{ ansible_user }}
+          
+          Este archivo fue creado automáticamente por AWX
+        dest: /tmp/awx_remote_test_{{ ansible_date_time.epoch }}.txt
+        mode: '0644'
+    
+    - name: Mostrar resumen final
+      debug:
+        msg: |
+          === RESUMEN EJECUCIÓN ===
+          ✅ Conectividad: OK
+          ✅ Información recopilada: OK
+          ✅ Archivo creado: /tmp/awx_remote_test_{{ ansible_date_time.epoch }}.txt
+          🎯 Automatización completada exitosamente
