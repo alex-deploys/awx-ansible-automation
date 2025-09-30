@@ -1,0 +1,46 @@
+---
+- name: Probar Inventario Dinámico Azure
+  hosts: localhost
+  gather_facts: no
+  
+  tasks:
+    - name: Mensaje de inicio
+      debug:
+        msg: "🧪 Probando inventario dinámico de Azure..."
+    
+    - name: Ejecutar actualización de inventario
+      import_playbook: azure_update_dynamic_inventory.yml
+    
+    - name: Mostrar archivos generados
+      debug:
+        msg: |
+          ✅ Inventario dinámico actualizado
+          
+          📁 Archivos disponibles:
+          - /tmp/azure_dynamic_inventory.yml (formato YAML)
+          - /tmp/azure_dynamic_inventory.ini (formato INI)
+          - /tmp/azure_inventory_full_*.json (reporte completo)
+    
+    - name: Verificar contenido del inventario YAML
+      command: head -50 /tmp/azure_dynamic_inventory.yml
+      register: inventory_preview
+      changed_when: false
+    
+    - name: Mostrar preview del inventario
+      debug:
+        msg: "{{ inventory_preview.stdout_lines }}"
+
+- name: Probar grupos de inventario (si hay recursos)
+  hosts: azure_app_service_plans
+  gather_facts: no
+  
+  tasks:
+    - name: Listar App Service Plans encontrados
+      debug:
+        msg: |
+          📱 App Service Plan: {{ inventory_hostname }}
+          📁 Resource Group: {{ azure_resource_group }}
+          📍 Location: {{ azure_location }}
+          🎚️  SKU Tier: {{ azure_sku_tier }}
+          🏷️  SKU Name: {{ azure_sku_name }}
+      when: inventory_hostname is defined

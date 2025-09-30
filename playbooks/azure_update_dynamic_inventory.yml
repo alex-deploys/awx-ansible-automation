@@ -1,0 +1,315 @@
+---
+- name: Azure Dynamic Inventory - Actualización Automática
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    inventory_output_file: "/tmp/azure_dynamic_inventory.yml"
+    
+  tasks:
+    - name: Iniciar descubrimiento de recursos Azure
+      debug:
+        msg: "🔍 Iniciando descubrimiento automático de recursos Azure..."
+    
+    # Obtener Resource Groups
+    - name: Obtener Resource Groups
+      azure.azcollection.azure_rm_resourcegroup_info:
+      register: resource_groups
+    
+    # Obtener Virtual Machines
+    - name: Obtener Virtual Machines
+      azure.azcollection.azure_rm_virtualmachine_info:
+      register: virtual_machines
+    
+    # Obtener IPs públicas de las VMs
+    - name: Obtener direcciones IP públicas
+      azure.azcollection.azure_rm_publicipaddress_info:
+        resource_group: "{{ item.resource_group }}"
+      loop: "{{ resource_groups.resourcegroups }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: public_ips
+      ignore_errors: yes
+    
+    # Obtener App Service Plans
+    - name: Obtener App Service Plans
+      azure.azcollection.azure_rm_appserviceplan_info:
+      register: service_plans
+    
+    # Obtener Web Apps
+    - name: Obtener Web Apps
+      azure.azcollection.azure_rm_webapp_info:
+      register: web_apps
+      ignore_errors: yes
+    
+    # Obtener Storage Accounts
+    - name: Obtener Storage Accounts
+      azure.azcollection.azure_rm_storageaccount_info:
+      register: storage_accounts
+    
+    # Obtener SQL Servers
+    - name: Obtener SQL Servers
+      azure.azcollection.azure_rm_sqlserver_info:
+      register: sql_servers
+      ignore_errors: yes
+    
+    # Obtener Virtual Networks
+    - name: Obtener Virtual Networks
+      azure.azcollection.azure_rm_virtualnetwork_info:
+      register: virtual_networks
+    
+    # Crear resumen
+    - name: Crear resumen de recursos descubiertos
+      set_fact:
+        inventory_summary:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          resource_groups: "{{ resource_groups.resourcegroups | length }}"
+          virtual_machines: "{{ virtual_machines.vms | length }}"
+          app_service_plans: "{{ service_plans.appserviceplans | length }}"
+          web_apps: "{{ web_apps.webapps | default([]) | length }}"
+          storage_accounts: "{{ storage_accounts.storageaccounts | length }}"
+          sql_servers: "{{ sql_servers.servers | default([]) | length }}"
+          virtual_networks: "{{ virtual_networks.virtualnetworks | length }}"
+    
+    - name: Mostrar resumen de descubrimiento
+      debug:
+        msg: |
+          === INVENTARIO DINÁMICO AZURE ===
+          📅 Actualizado: {{ inventory_summary.timestamp }}
+          
+          📊 Recursos Descubiertos:
+          📁 Resource Groups: {{ inventory_summary.resource_groups }}
+          🖥️  Virtual Machines: {{ inventory_summary.virtual_machines }}
+          📱 App Service Plans: {{ inventory_summary.app_service_plans }}
+          🌐 Web Apps: {{ inventory_summary.web_apps }}
+          💾 Storage Accounts: {{ inventory_summary.storage_accounts }}
+          🗄️  SQL Servers: {{ inventory_summary.sql_servers }}
+          🔌 Virtual Networks: {{ inventory_summary.virtual_networks }}
+    
+    # Generar inventario en formato YAML para AWX
+    - name: Generar inventario dinámico YAML
+      copy:
+        content: |
+          # Azure Dynamic Inventory
+          # Generado automáticamente: {{ ansible_date_time.iso8601 }}
+          # Total recursos: {{ inventory_summary.resource_groups }}
+          
+          all:
+            children:
+              azure:
+                children:
+                  # === VIRTUAL MACHINES ===
+                  azure_vms:
+                    hosts:
+          {% for vm in virtual_machines.vms %}
+                      {{ vm.name }}:
+                        ansible_host: {{ vm.name }}
+                        azure_resource_group: {{ vm.resource_group }}
+                        azure_location: {{ vm.location }}
+                        azure_vm_size: {{ vm.hardware_profile.vm_size }}
+                        azure_os_type: {{ vm.storage_profile.os_disk.os_type }}
+                        azure_resource_type: virtual_machine
+          {% endfor %}
+          
+                  # === APP SERVICE PLANS ===
+                  azure_app_service_plans:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+                      {{ plan.name }}:
+                        ansible_host: localhost
+                        azure_resource_group: {{ plan.resource_group }}
+                        azure_location: {{ plan.location }}
+                        azure_sku_tier: {{ plan.sku.tier }}
+                        azure_sku_name: {{ plan.sku.name }}
+                        azure_sku_capacity: {{ plan.sku.capacity }}
+                        azure_resource_type: app_service_plan
+                        azure_plan_id: {{ plan.id }}
+          {% endfor %}
+          
+                  # === WEB APPS ===
+                  azure_web_apps:
+                    hosts:
+          {% for app in web_apps.webapps | default([]) %}
+                      {{ app.name }}:
+                        ansible_host: localhost
+                        azure_resource_group: {{ app.resource_group }}
+                        azure_location: {{ app.location }}
+                        azure_default_host_name: {{ app.default_host_name }}
+                        azure_app_service_plan: {{ app.server_farm_id.split('/')[-1] }}
+                        azure_resource_type: web_app
+          {% endfor %}
+          
+                  # === STORAGE ACCOUNTS ===
+                  azure_storage_accounts:
+                    hosts:
+          {% for storage in storage_accounts.storageaccounts %}
+                      {{ storage.name }}:
+                        ansible_host: localhost
+                        azure_resource_group: {{ storage.resource_group }}
+                        azure_location: {{ storage.location }}
+                        azure_sku_name: {{ storage.sku.name }}
+                        azure_kind: {{ storage.kind }}
+                        azure_resource_type: storage_account
+          {% endfor %}
+          
+                  # === GRUPOS POR RESOURCE GROUP ===
+          {% for rg in resource_groups.resourcegroups %}
+                  rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}:
+                    hosts:
+          {% for vm in virtual_machines.vms %}
+          {% if vm.resource_group == rg.name %}
+                      {{ vm.name }}:
+          {% endif %}
+          {% endfor %}
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.resource_group == rg.name %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+          {% for app in web_apps.webapps | default([]) %}
+          {% if app.resource_group == rg.name %}
+                      {{ app.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_resource_group: {{ rg.name }}
+                      azure_location: {{ rg.location }}
+          {% endfor %}
+          
+                  # === GRUPOS POR UBICACIÓN ===
+          {% for location in resource_groups.resourcegroups | map(attribute='location') | unique %}
+                  location_{{ location | regex_replace('[^a-zA-Z0-9]', '_') }}:
+                    hosts:
+          {% for vm in virtual_machines.vms %}
+          {% if vm.location == location %}
+                      {{ vm.name }}:
+          {% endif %}
+          {% endfor %}
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.location == location %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_location: {{ location }}
+          {% endfor %}
+          
+                  # === APP SERVICE PLANS POR TIER ===
+          {% for tier in service_plans.appserviceplans | map(attribute='sku.tier') | unique %}
+                  tier_{{ tier | lower }}:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == tier %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_sku_tier: {{ tier }}
+          {% endfor %}
+          
+                vars:
+                  ansible_connection: local
+                  azure_managed: true
+                  inventory_updated: {{ ansible_date_time.iso8601 }}
+        dest: "{{ inventory_output_file }}"
+    
+    # Crear inventario INI también (para compatibilidad)
+    - name: Generar inventario dinámico INI
+      copy:
+        content: |
+          # Azure Dynamic Inventory (INI format)
+          # Generado: {{ ansible_date_time.iso8601 }}
+          
+          # === VIRTUAL MACHINES ===
+          [azure_vms]
+          {% for vm in virtual_machines.vms %}
+          {{ vm.name }} azure_resource_group={{ vm.resource_group }} azure_location={{ vm.location }}
+          {% endfor %}
+          
+          # === APP SERVICE PLANS ===
+          [azure_app_service_plans]
+          {% for plan in service_plans.appserviceplans %}
+          {{ plan.name }} azure_resource_group={{ plan.resource_group }} azure_sku_tier={{ plan.sku.tier }} azure_sku_name={{ plan.sku.name }}
+          {% endfor %}
+          
+          # === APP SERVICE PLANS POR TIER ===
+          [tier_free]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Free' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          [tier_basic]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Basic' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          [tier_standard]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Standard' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          # === GRUPOS POR RESOURCE GROUP ===
+          {% for rg in resource_groups.resourcegroups %}
+          [rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.resource_group == rg.name %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          {% endfor %}
+          
+          # === TODOS LOS RECURSOS ===
+          [azure_all:children]
+          azure_vms
+          azure_app_service_plans
+          
+          [azure_all:vars]
+          ansible_connection=local
+          azure_managed=true
+        dest: "/tmp/azure_dynamic_inventory.ini"
+    
+    # Crear reporte JSON completo
+    - name: Crear reporte JSON de inventario
+      copy:
+        content: |
+          {
+            "inventory_metadata": {
+              "generated_at": "{{ ansible_date_time.iso8601 }}",
+              "generator": "AWX Azure Dynamic Inventory",
+              "summary": {{ inventory_summary | to_nice_json }}
+            },
+            "resource_groups": {{ resource_groups.resourcegroups | to_nice_json }},
+            "virtual_machines": {{ virtual_machines.vms | to_nice_json }},
+            "app_service_plans": {{ service_plans.appserviceplans | to_nice_json }},
+            "web_apps": {{ web_apps.webapps | default([]) | to_nice_json }},
+            "storage_accounts": {{ storage_accounts.storageaccounts | to_nice_json }},
+            "sql_servers": {{ sql_servers.servers | default([]) | to_nice_json }},
+            "virtual_networks": {{ virtual_networks.virtualnetworks | to_nice_json }}
+          }
+        dest: "/tmp/azure_inventory_full_{{ ansible_date_time.epoch }}.json"
+    
+    - name: Resumen final
+      debug:
+        msg: |
+          === INVENTARIO DINÁMICO GENERADO ===
+          
+          📁 Archivos creados:
+          📋 YAML: {{ inventory_output_file }}
+          📋 INI: /tmp/azure_dynamic_inventory.ini
+          📊 JSON: /tmp/azure_inventory_full_{{ ansible_date_time.epoch }}.json
+          
+          📊 Recursos organizados por:
+          ✅ Tipo de recurso (VMs, App Plans, Web Apps, Storage)
+          ✅ Resource Group
+          ✅ Ubicación geográfica
+          ✅ Tier de App Service Plan (Free, Basic, Standard)
+          
+          🔄 Este inventario se actualizará automáticamente en cada ejecución
+          
+          💡 Próximo paso: Usa este inventario en tus Job Templates de AWX

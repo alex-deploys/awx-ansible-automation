@@ -1,5 +1,8 @@
-# Directorio de inventarios
-inventory/
+# Directorio de inventarios (solo ignorar archivos generados)
+inventory/hosts
+inventory/production
+inventory/*.cache
+inventory/*.generated
 
 # Archivos temporales de Ansible
 *.retry

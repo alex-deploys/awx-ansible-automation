@@ -1,0 +1,46 @@
+# Azure App Service Plans Dynamic Inventory
+# Plugin personalizado para inventario de App Service Plans
+# Este archivo será usado por el playbook azure_update_dynamic_inventory.yml
+
+plugin: azure.azcollection.azure_rm
+
+# Este inventario se centra en App Service Plans
+# Nota: El plugin azure_rm solo soporta VMs nativamente,
+# por lo que usaremos el playbook complementario para App Service Plans
+
+# Configuración base
+include_vm_resource_groups:
+  - "*"
+
+# Autenticación desde AWX credentials
+auth_source: auto
+
+# Agrupar recursos
+keyed_groups:
+  # Por Resource Group
+  - key: resource_group
+    prefix: rg
+    separator: "_"
+  
+  # Por ubicación
+  - key: location  
+    prefix: location
+    separator: "_"
+
+# Variables de host
+hostvar_expressions:
+  azure_resource_group: resource_group
+  azure_location: location
+  azure_tags: tags
+
+# Cache para mejorar rendimiento
+cache: yes
+cache_plugin: jsonfile
+cache_timeout: 1800
+cache_connection: /tmp/ansible_azure_app_plans_cache
+cache_prefix: azure_app_plans
+
+# Nota Importante:
+# Para App Service Plans, Web Apps y otros recursos no-VM,
+# usa el playbook azure_update_dynamic_inventory.yml que genera
+# un inventario completo usando los módulos azure_rm_*_info
