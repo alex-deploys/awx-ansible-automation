@@ -1,0 +1,185 @@
+---
+#
+# Playbook de Ansible para escalado automático de Azure Service Plans
+# 
+# Este playbook busca todos los Service Plans con el tag "schedule:8x5"
+# y realiza escalado automático basado en el horario:
+# - Horario laboral (8:00-17:00, Lunes-Viernes): Scale UP a B1
+# - Horario no laboral: Scale DOWN a F1
+#
+# Autor: Sistema de Automatización
+# Fecha: {{ ansible_date_time.date }}
+#
+
+- name: "Azure Service Plan Auto Scaler - Schedule 8x5"
+  hosts: localhost
+  gather_facts: yes
+  connection: local
+  
+  vars:
+    # Configuración de horarios laborales
+    work_hours:
+      start: 8    # Hora de inicio (24h format)
+      end: 17     # Hora de fin (24h format)
+      timezone: "Europe/Madrid"  # Zona horaria
+    
+    # Configuración de escalado
+    scaling_config:
+      work_hours_sku: "B1"     # SKU para horario laboral
+      off_hours_sku: "F1"     # SKU para horario no laboral
+      target_tag: "schedule:8x5"  # Tag a buscar
+    
+    # Variables de Azure (se pueden definir en AWX como extra_vars)
+    azure_subscription_id: "{{ azure_subscription_id | default('') }}"
+    azure_tenant_id: "{{ azure_tenant_id | default('') }}"
+    azure_client_id: "{{ azure_client_id | default('') }}"
+    azure_client_secret: "{{ azure_client_secret | default('') }}"
+
+  tasks:
+    - name: "Verificar variables de Azure requeridas"
+      ansible.builtin.fail:
+        msg: "Las credenciales de Azure son requeridas. Configura azure_subscription_id, azure_tenant_id, azure_client_id, azure_client_secret"
+      when: >
+        azure_subscription_id == '' or
+        azure_tenant_id == '' or
+        azure_client_id == '' or
+        azure_client_secret == ''
+
+    - name: "Obtener fecha y hora actual"
+      ansible.builtin.set_fact:
+        current_datetime: "{{ ansible_date_time }}"
+        current_hour: "{{ ansible_date_time.hour | int }}"
+        current_weekday: "{{ ansible_date_time.weekday | int }}"  # 0=Monday, 6=Sunday
+
+    - name: "Determinar si estamos en horario laboral"
+      ansible.builtin.set_fact:
+        is_work_hours: >-
+          {{
+            (current_weekday | int >= 0 and current_weekday | int <= 4) and
+            (current_hour | int >= work_hours.start and current_hour | int < work_hours.end)
+          }}
+
+    - name: "Mostrar información del horario actual"
+      ansible.builtin.debug:
+        msg: |
+          Información de horario:
+          - Fecha y hora actual: {{ current_datetime.date }} {{ current_datetime.time }}
+          - Día de la semana: {{ current_weekday }} (0=Lunes, 6=Domingo)
+          - Hora actual: {{ current_hour }}
+          - ¿Es horario laboral?: {{ is_work_hours }}
+          - SKU objetivo: {{ scaling_config.work_hours_sku if is_work_hours else scaling_config.off_hours_sku }}
+
+    - name: "Determinar SKU objetivo basado en el horario"
+      ansible.builtin.set_fact:
+        target_sku: "{{ scaling_config.work_hours_sku if is_work_hours else scaling_config.off_hours_sku }}"
+
+    - name: "Buscar todos los resource groups"
+      azure.azcollection.azure_rm_resourcegroup_info:
+        auth_source: credential
+        subscription_id: "{{ azure_subscription_id }}"
+        tenant: "{{ azure_tenant_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_client_secret }}"
+      register: resource_groups
+
+    - name: "Buscar Service Plans en todos los resource groups"
+      azure.azcollection.azure_rm_appserviceplan_info:
+        auth_source: credential
+        subscription_id: "{{ azure_subscription_id }}"
+        tenant: "{{ azure_tenant_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_client_secret }}"
+        resource_group: "{{ item.name }}"
+      register: service_plans_results
+      loop: "{{ resource_groups.resourcegroups }}"
+      failed_when: false
+
+    - name: "Consolidar lista de todos los Service Plans"
+      ansible.builtin.set_fact:
+        all_service_plans: >-
+          {{
+            service_plans_results.results
+            | selectattr('appserviceplans', 'defined')
+            | map(attribute='appserviceplans')
+            | list
+            | flatten
+          }}
+
+    - name: "Filtrar Service Plans con el tag schedule:8x5"
+      ansible.builtin.set_fact:
+        scheduled_service_plans: >-
+          {{
+            all_service_plans
+            | selectattr('tags', 'defined')
+            | selectattr('tags.schedule', 'defined')
+            | selectattr('tags.schedule', 'equalto', '8x5')
+            | list
+          }}
+
+    - name: "Mostrar Service Plans encontrados con tag schedule:8x5"
+      ansible.builtin.debug:
+        msg: |
+          Service Plans encontrados con tag 'schedule:8x5':
+          {% for plan in scheduled_service_plans %}
+          - Nombre: {{ plan.name }}
+            Resource Group: {{ plan.resource_group }}
+            SKU Actual: {{ plan.sku.name }}
+            SKU Objetivo: {{ target_sku }}
+            Cambio necesario: {{ plan.sku.name != target_sku }}
+          {% endfor %}
+          
+          Total encontrados: {{ scheduled_service_plans | length }}
+
+    - name: "Filtrar Service Plans que necesitan cambio de SKU"
+      ansible.builtin.set_fact:
+        plans_to_scale: >-
+          {{
+            scheduled_service_plans
+            | selectattr('sku.name', 'ne', target_sku)
+            | list
+          }}
+
+    - name: "Escalar Service Plans que necesitan cambio"
+      azure.azcollection.azure_rm_appserviceplan:
+        auth_source: credential
+        subscription_id: "{{ azure_subscription_id }}"
+        tenant: "{{ azure_tenant_id }}"
+        client_id: "{{ azure_client_id }}"
+        secret: "{{ azure_client_secret }}"
+        resource_group: "{{ item.resource_group }}"
+        name: "{{ item.name }}"
+        sku: "{{ target_sku }}"
+        state: present
+      register: scaling_results
+      loop: "{{ plans_to_scale }}"
+      when: plans_to_scale | length > 0
+
+    - name: "Mostrar resultados del escalado"
+      ansible.builtin.debug:
+        msg: |
+          Resumen del escalado:
+          - Service Plans encontrados con tag 'schedule:8x5': {{ scheduled_service_plans | length }}
+          - Service Plans que necesitaban escalado: {{ plans_to_scale | length }}
+          - Horario actual: {{ 'Laboral' if is_work_hours else 'No laboral' }}
+          - SKU objetivo aplicado: {{ target_sku }}
+          
+          {% if plans_to_scale | length > 0 %}
+          Detalles del escalado:
+          {% for result in scaling_results.results %}
+          - {{ result.item.name }}: {{ result.item.sku.name }} → {{ target_sku }} ({{ 'Exitoso' if not result.failed else 'Falló' }})
+          {% endfor %}
+          {% else %}
+          No se requirieron cambios de escalado.
+          {% endif %}
+
+    - name: "Registrar actividad en log"
+      ansible.builtin.lineinfile:
+        path: "/tmp/azure_serviceplan_autoscaler.log"
+        line: >-
+          {{ ansible_date_time.iso8601 }} - 
+          Escalado automático ejecutado: 
+          {{ scheduled_service_plans | length }} planes encontrados, 
+          {{ plans_to_scale | length }} escalados a {{ target_sku }} 
+          ({{ 'horario laboral' if is_work_hours else 'horario no laboral' }})
+        create: yes
+      delegate_to: localhost

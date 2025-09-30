@@ -1,0 +1,30 @@
+# Template de variables para Azure Service Plan Auto Scaler
+# 
+# Configura estas variables en AWX como extra_vars o en un archivo de variables
+# 
+
+# === CREDENCIALES DE AZURE (REQUERIDAS) ===
+# Estas variables deben configurarse en AWX como credenciales seguras
+azure_subscription_id: "tu-subscription-id-aqui"
+azure_tenant_id: "tu-tenant-id-aqui" 
+azure_client_id: "tu-client-id-aqui"
+azure_client_secret: "tu-client-secret-aqui"
+
+# === CONFIGURACIÓN DE HORARIOS ===
+work_hours:
+  start: 8              # Hora de inicio del horario laboral (formato 24h)
+  end: 17               # Hora de fin del horario laboral (formato 24h)
+  timezone: "Europe/Madrid"  # Zona horaria
+
+# === CONFIGURACIÓN DE ESCALADO ===
+scaling_config:
+  work_hours_sku: "B1"      # SKU para horario laboral (más potente)
+  off_hours_sku: "F1"      # SKU para horario no laboral (más económico)
+  target_tag: "schedule:8x5"   # Tag que deben tener los Service Plans para ser gestionados
+
+# === OPCIONES ADICIONALES ===
+# Activar logging detallado
+verbose_logging: true
+
+# Modo de prueba (no realiza cambios reales)
+dry_run: false

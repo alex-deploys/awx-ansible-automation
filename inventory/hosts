@@ -1,0 +1,7 @@
+# Inventario para ejecución local de playbooks de Azure
+[local]
+localhost ansible_connection=local
+
+[local:vars]
+# Variables por defecto para conexión local
+ansible_python_interpreter=/usr/bin/python3
