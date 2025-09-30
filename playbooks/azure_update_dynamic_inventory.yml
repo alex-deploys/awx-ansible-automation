@@ -46,11 +46,12 @@
       azure.azcollection.azure_rm_storageaccount_info:
       register: storage_accounts
     
-    # Obtener SQL Servers
+    # Obtener SQL Servers (opcional - puede fallar si falta el SDK)
     - name: Obtener SQL Servers
       azure.azcollection.azure_rm_sqlserver_info:
       register: sql_servers
       ignore_errors: yes
+      failed_when: false
     
     # Obtener Virtual Networks
     - name: Obtener Virtual Networks

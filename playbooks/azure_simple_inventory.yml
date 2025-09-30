@@ -1,0 +1,242 @@
+---
+- name: Azure Simple Inventory - Solo Recursos Esenciales
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    inventory_output_file: "/tmp/azure_simple_inventory.yml"
+    
+  tasks:
+    - name: Iniciar descubrimiento simplificado
+      debug:
+        msg: "🔍 Descubriendo App Service Plans (versión simplificada para AWX)..."
+    
+    # Solo recursos esenciales que no requieren SDKs extra
+    - name: Obtener Resource Groups
+      azure.azcollection.azure_rm_resourcegroup_info:
+      register: resource_groups
+    
+    - name: Obtener App Service Plans
+      azure.azcollection.azure_rm_appserviceplan_info:
+      register: service_plans
+    
+    # Web Apps - opcional
+    - name: Obtener Web Apps
+      azure.azcollection.azure_rm_webapp_info:
+      register: web_apps
+      ignore_errors: yes
+      failed_when: false
+    
+    # Storage Accounts - opcional
+    - name: Obtener Storage Accounts
+      azure.azcollection.azure_rm_storageaccount_info:
+      register: storage_accounts
+      ignore_errors: yes
+      failed_when: false
+    
+    # VMs - opcional
+    - name: Obtener Virtual Machines
+      azure.azcollection.azure_rm_virtualmachine_info:
+      register: virtual_machines
+      ignore_errors: yes
+      failed_when: false
+    
+    # Crear resumen con valores por defecto para recursos que fallaron
+    - name: Crear resumen de recursos descubiertos
+      set_fact:
+        inventory_summary:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          resource_groups: "{{ resource_groups.resourcegroups | length }}"
+          app_service_plans: "{{ service_plans.appserviceplans | length }}"
+          web_apps: "{{ (web_apps.webapps | default([])) | length }}"
+          storage_accounts: "{{ (storage_accounts.storageaccounts | default([])) | length }}"
+          virtual_machines: "{{ (virtual_machines.vms | default([])) | length }}"
+    
+    - name: Mostrar resumen de descubrimiento
+      debug:
+        msg: |
+          === INVENTARIO SIMPLIFICADO AZURE ===
+          📅 Actualizado: {{ inventory_summary.timestamp }}
+          
+          📊 Recursos Descubiertos:
+          📁 Resource Groups: {{ inventory_summary.resource_groups }}
+          📱 App Service Plans: {{ inventory_summary.app_service_plans }}
+          🌐 Web Apps: {{ inventory_summary.web_apps }}
+          💾 Storage Accounts: {{ inventory_summary.storage_accounts }}
+          🖥️  Virtual Machines: {{ inventory_summary.virtual_machines }}
+    
+    # Generar inventario simplificado en formato YAML
+    - name: Generar inventario simplificado YAML
+      copy:
+        content: |
+          # Azure Simple Inventory
+          # Generado automáticamente: {{ ansible_date_time.iso8601 }}
+          # Focus: App Service Plans para automatización de escalado
+          
+          all:
+            children:
+              azure:
+                children:
+                  # === APP SERVICE PLANS ===
+                  azure_app_service_plans:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+                      {{ plan.name }}:
+                        ansible_host: localhost
+                        azure_resource_group: {{ plan.resource_group }}
+                        azure_location: {{ plan.location }}
+                        azure_sku_tier: {{ plan.sku.tier }}
+                        azure_sku_name: {{ plan.sku.name }}
+                        azure_sku_capacity: {{ plan.sku.capacity }}
+                        azure_resource_type: app_service_plan
+                        azure_plan_id: {{ plan.id }}
+          {% endfor %}
+          
+                  # === APP SERVICE PLANS POR TIER ===
+                  tier_free:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Free' %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_sku_tier: Free
+          
+                  tier_basic:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Basic' %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_sku_tier: Basic
+          
+                  tier_standard:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Standard' %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_sku_tier: Standard
+          
+                  tier_premium:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Premium' or plan.sku.tier == 'PremiumV2' or plan.sku.tier == 'PremiumV3' %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_sku_tier: Premium
+          
+                  # === GRUPOS POR RESOURCE GROUP ===
+          {% for rg in resource_groups.resourcegroups %}
+                  rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.resource_group == rg.name %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_resource_group: {{ rg.name }}
+                      azure_location: {{ rg.location }}
+          {% endfor %}
+          
+                  # === GRUPOS POR UBICACIÓN ===
+          {% for location in service_plans.appserviceplans | map(attribute='location') | unique %}
+                  location_{{ location | regex_replace('[^a-zA-Z0-9]', '_') }}:
+                    hosts:
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.location == location %}
+                      {{ plan.name }}:
+          {% endif %}
+          {% endfor %}
+                    vars:
+                      azure_location: {{ location }}
+          {% endfor %}
+          
+                vars:
+                  ansible_connection: local
+                  azure_managed: true
+                  inventory_updated: {{ ansible_date_time.iso8601 }}
+        dest: "{{ inventory_output_file }}"
+    
+    # Crear inventario INI también
+    - name: Generar inventario simplificado INI
+      copy:
+        content: |
+          # Azure Simple Inventory (INI format)
+          # Generado: {{ ansible_date_time.iso8601 }}
+          
+          # === APP SERVICE PLANS ===
+          [azure_app_service_plans]
+          {% for plan in service_plans.appserviceplans %}
+          {{ plan.name }} azure_resource_group={{ plan.resource_group }} azure_sku_tier={{ plan.sku.tier }} azure_sku_name={{ plan.sku.name }}
+          {% endfor %}
+          
+          # === APP SERVICE PLANS POR TIER ===
+          [tier_free]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Free' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          [tier_basic]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Basic' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          [tier_standard]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.sku.tier == 'Standard' %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          # === GRUPOS POR RESOURCE GROUP ===
+          {% for rg in resource_groups.resourcegroups %}
+          [rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}]
+          {% for plan in service_plans.appserviceplans %}
+          {% if plan.resource_group == rg.name %}
+          {{ plan.name }}
+          {% endif %}
+          {% endfor %}
+          
+          {% endfor %}
+          
+          # === TODOS LOS RECURSOS ===
+          [azure_all:children]
+          azure_app_service_plans
+          
+          [azure_all:vars]
+          ansible_connection=local
+          azure_managed=true
+        dest: "/tmp/azure_simple_inventory.ini"
+    
+    - name: Resumen final
+      debug:
+        msg: |
+          ✅ INVENTARIO SIMPLIFICADO GENERADO
+          
+          📁 Archivos creados:
+          📋 YAML: {{ inventory_output_file }}
+          📋 INI: /tmp/azure_simple_inventory.ini
+          
+          📊 App Service Plans encontrados: {{ inventory_summary.app_service_plans }}
+          
+          📊 Grupos disponibles:
+          ✅ azure_app_service_plans - Todos los planes
+          ✅ tier_free - Planes F1
+          ✅ tier_basic - Planes B1/B2/B3
+          ✅ tier_standard - Planes S1/S2/S3
+          ✅ rg_<nombre> - Por Resource Group
+          ✅ location_<region> - Por ubicación
+          
+          🎯 Listo para usar en Job Templates de AWX

@@ -85,6 +85,8 @@ http://192.168.49.2:32741
 
 ### 4️⃣ Crear Job Template para Actualizar Inventario
 
+**⚠️ IMPORTANTE**: AWX tiene limitaciones en los módulos Python disponibles. Usa el playbook simplificado.
+
 1. Ve a **Resources → Templates**
 2. Click **Add** → **Add job template**
 3. Configura:
@@ -92,12 +94,29 @@ http://192.168.49.2:32741
    - **Job Type**: Run
    - **Inventory**: `Azure Dynamic Inventory`
    - **Project**: `Ansible Automatizaciones`
-   - **Playbook**: `playbooks/azure_update_dynamic_inventory.yml`
+   - **Playbook**: `playbooks/azure_simple_inventory.yml` ⚠️ (usa la versión simplificada)
    - **Credentials**:
      - Type `Microsoft Azure Resource Manager` → `Azure - Service Principal`
    - **Options**:
      - ✅ Enable Concurrent Jobs: NO
 4. **Save**
+
+> 💡 **Nota**: El playbook `azure_simple_inventory.yml` solo descubre App Service Plans y recursos esenciales.  
+> No requiere SDKs adicionales y funciona perfectamente en AWX.
+
+#### 4.1 (Opcional) Crear Job Template de Diagnóstico
+
+Para verificar el entorno de AWX antes de empezar:
+
+1. Click **Add** → **Add job template**
+2. Configura:
+   - **Name**: `AWX - Diagnostics`
+   - **Job Type**: Run
+   - **Inventory**: `Azure Dynamic Inventory`
+   - **Project**: `Ansible Automatizaciones`
+   - **Playbook**: `playbooks/awx_diagnostics.yml`
+   - **Credentials**: `Azure - Service Principal`
+3. **Save** y **Launch** para ver qué módulos están disponibles
 
 ### 5️⃣ Probar el Inventario
 
@@ -190,12 +209,16 @@ Después de ejecutar el inventario dinámico, podrás usar estos grupos en tus p
 ```bash
 cd /home/alazar/acciona/ansible-automatizaciones
 
-# Probar inventario
-ansible-playbook playbooks/azure_update_dynamic_inventory.yml \
+# ⚠️ Usa el playbook simplificado (funciona en AWX)
+ansible-playbook playbooks/azure_simple_inventory.yml \
   --extra-vars "@.azure_credentials.yml"
 
 # Ver inventario generado
-cat /tmp/azure_dynamic_inventory.yml
+cat /tmp/azure_simple_inventory.yml
+
+# (Opcional) Diagnóstico del entorno
+ansible-playbook playbooks/awx_diagnostics.yml \
+  --extra-vars "@.azure_credentials.yml"
 
 # Probar escalado (simulación)
 ansible-playbook playbooks/azure_auto_scale_by_time.yml \
@@ -217,9 +240,11 @@ ansible-playbook playbooks/azure_auto_scale_by_time.yml \
 ```
 ansible-automatizaciones/
 ├── playbooks/
-│   ├── azure_update_dynamic_inventory.yml  ← Actualiza inventario
+│   ├── azure_simple_inventory.yml          ← Actualiza inventario (AWX-compatible) ⭐
+│   ├── azure_update_dynamic_inventory.yml  ← Versión completa (solo local)
 │   ├── azure_auto_scale_by_time.yml        ← Escalado automático
 │   ├── azure_list_service_plans.yml        ← Listar planes
+│   ├── awx_diagnostics.yml                 ← Diagnóstico de AWX ⭐
 │   └── test_dynamic_inventory.yml          ← Pruebas
 ├── inventory/
 │   ├── azure_dynamic_inventory.py          ← Script para AWX
@@ -229,6 +254,8 @@ ansible-automatizaciones/
 │   └── INVENTARIO_DINAMICO.md              ← Documentación completa
 └── .azure_credentials.yml                  ← Credenciales (LOCAL, no en git)
 ```
+
+**⭐ = Recomendado para usar en AWX**
 
 ---
 
