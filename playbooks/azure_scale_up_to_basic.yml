@@ -1,0 +1,49 @@
+---
+- name: Escalar App Service Plans a Basic (B1) - Manual
+  hosts: localhost
+  gather_facts: no
+  vars:
+    target_tier: "Basic"
+    target_size: "B1"
+  
+  tasks:
+    - name: Obtener App Service Plans actuales
+      azure.azcollection.azure_rm_appserviceplan_info:
+      register: service_plans
+    
+    - name: Identificar planes en tier Free
+      set_fact:
+        free_plans: "{{ service_plans.appserviceplans | selectattr('sku.tier', 'equalto', 'Free') | list }}"
+    
+    - name: Mostrar planes a escalar
+      debug:
+        msg: |
+          🔼 ESCALAR A BASIC (B1)
+          
+          Planes encontrados en tier Free: {{ free_plans | length }}
+          {% for sp in free_plans %}
+          - {{ sp.name }} ({{ sp.resource_group }})
+          {% endfor %}
+    
+    - name: Escalar a Basic B1
+      azure.azcollection.azure_rm_appserviceplan:
+        resource_group: "{{ item.resource_group }}"
+        name: "{{ item.name }}"
+        location: "{{ item.location }}"
+        sku:
+          name: "{{ target_size }}"
+          tier: "{{ target_tier }}"
+          capacity: 1
+      loop: "{{ free_plans }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: free_plans | length > 0
+    
+    - name: Resultado
+      debug:
+        msg: |
+          {% if free_plans | length > 0 %}
+          ✅ {{ free_plans | length }} Service Plan(s) escalado(s) a {{ target_tier }} ({{ target_size }})
+          {% else %}
+          ℹ️  No se encontraron Service Plans en tier Free
+          {% endif %}

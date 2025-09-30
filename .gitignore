@@ -15,3 +15,8 @@ inventory/
 # Archivos del sistema
 .DS_Store
 Thumbs.db
+
+# Credenciales Azure (NUNCA SUBIR)
+.azure_credentials.yml
+*credentials*
+*.secret

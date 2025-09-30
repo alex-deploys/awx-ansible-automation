@@ -1,0 +1,173 @@
+---
+- name: Escalado Automático de App Service Plans por Horario
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    # Configuración de horarios (hora UTC)
+    business_hours_start: 8   # 8:00 AM
+    business_hours_end: 18    # 6:00 PM
+    
+    # Tiers para escalado
+    working_tier: "Basic"
+    working_size: "B1"
+    off_hours_tier: "Free"
+    off_hours_size: "F1"
+    
+    # Días laborables (1=Lunes, 7=Domingo)
+    working_days: [1, 2, 3, 4, 5]  # Lunes a Viernes
+  
+  tasks:
+    - name: Obtener hora actual (UTC)
+      set_fact:
+        current_hour: "{{ ansible_date_time.hour | int }}"
+        current_day: "{{ ansible_date_time.weekday | int + 1 }}"
+        current_datetime: "{{ ansible_date_time.iso8601 }}"
+    
+    - name: Determinar si es horario laboral
+      set_fact:
+        is_business_hours: "{{ (current_hour | int >= business_hours_start and current_hour | int < business_hours_end) and (current_day | int in working_days) }}"
+    
+    - name: Mostrar análisis de horario
+      debug:
+        msg: |
+          ⏰ ANÁLISIS DE HORARIO
+          📅 Fecha/Hora: {{ current_datetime }}
+          🕐 Hora actual (UTC): {{ current_hour }}:00
+          📆 Día de la semana: {{ current_day }} (1=Lun, 7=Dom)
+          
+          🏢 Horario laboral: {{ business_hours_start }}:00 - {{ business_hours_end }}:00
+          📅 Días laborables: Lunes a Viernes
+          
+          {% if is_business_hours %}
+          ✅ HORARIO LABORAL ACTIVO
+          🔼 Acción: Escalar a {{ working_tier }} ({{ working_size }})
+          {% else %}
+          🌙 FUERA DE HORARIO LABORAL
+          🔽 Acción: Reducir a {{ off_hours_tier }} ({{ off_hours_size }})
+          {% endif %}
+    
+    - name: Obtener todos los App Service Plans
+      azure.azcollection.azure_rm_appserviceplan_info:
+      register: service_plans
+    
+    - name: Identificar Service Plans que necesitan cambio
+      set_fact:
+        plans_to_scale_up: "{{ service_plans.appserviceplans | selectattr('sku.tier', 'equalto', 'Free') | list if is_business_hours else [] }}"
+        plans_to_scale_down: "{{ service_plans.appserviceplans | selectattr('sku.tier', 'equalto', 'Basic') | list if not is_business_hours else [] }}"
+    
+    - name: Mostrar planes a modificar
+      debug:
+        msg: |
+          📊 PLANES A MODIFICAR:
+          
+          {% if is_business_hours %}
+          ⬆️  Escalar a {{ working_tier }} ({{ working_size }}):
+          {% for sp in plans_to_scale_up %}
+          - {{ sp.name }} ({{ sp.resource_group }})
+          {% endfor %}
+          Total: {{ plans_to_scale_up | length }}
+          {% else %}
+          ⬇️  Reducir a {{ off_hours_tier }} ({{ off_hours_size }}):
+          {% for sp in plans_to_scale_down %}
+          - {{ sp.name }} ({{ sp.resource_group }})
+          {% endfor %}
+          Total: {{ plans_to_scale_down | length }}
+          {% endif %}
+    
+    # ESCALAR HACIA ARRIBA (F1 -> B1)
+    - name: Escalar Service Plans a Basic (horario laboral)
+      azure.azcollection.azure_rm_appserviceplan:
+        resource_group: "{{ item.resource_group }}"
+        name: "{{ item.name }}"
+        location: "{{ item.location }}"
+        sku:
+          name: "{{ working_size }}"
+          tier: "{{ working_tier }}"
+          capacity: 1
+      loop: "{{ plans_to_scale_up }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: scale_up_results
+      when: 
+        - is_business_hours
+        - plans_to_scale_up | length > 0
+    
+    # ESCALAR HACIA ABAJO (B1 -> F1)
+    - name: Reducir Service Plans a Free (fuera de horario)
+      azure.azcollection.azure_rm_appserviceplan:
+        resource_group: "{{ item.resource_group }}"
+        name: "{{ item.name }}"
+        location: "{{ item.location }}"
+        sku:
+          name: "{{ off_hours_size }}"
+          tier: "{{ off_hours_tier }}"
+          capacity: 1
+      loop: "{{ plans_to_scale_down }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: scale_down_results
+      when: 
+        - not is_business_hours
+        - plans_to_scale_down | length > 0
+    
+    - name: Generar reporte de cambios
+      copy:
+        content: |
+          # App Service Plans - Reporte de Escalado Automático
+          
+          Ejecución: {{ current_datetime }}
+          Hora UTC: {{ current_hour }}:00
+          Día: {{ current_day }}
+          Horario Laboral: {{ 'SÍ' if is_business_hours else 'NO' }}
+          
+          ## Acción Realizada
+          {% if is_business_hours %}
+          ⬆️  Escalado a {{ working_tier }} ({{ working_size }})
+          Planes modificados: {{ plans_to_scale_up | length }}
+          
+          {% for sp in plans_to_scale_up %}
+          - {{ sp.name }} ({{ sp.resource_group }})
+            Antes: {{ sp.sku.tier }} ({{ sp.sku.name }})
+            Después: {{ working_tier }} ({{ working_size }})
+          {% endfor %}
+          {% else %}
+          ⬇️  Reducción a {{ off_hours_tier }} ({{ off_hours_size }})
+          Planes modificados: {{ plans_to_scale_down | length }}
+          
+          {% for sp in plans_to_scale_down %}
+          - {{ sp.name }} ({{ sp.resource_group }})
+            Antes: {{ sp.sku.tier }} ({{ sp.sku.name }})
+            Después: {{ off_hours_tier }} ({{ off_hours_size }})
+          {% endfor %}
+          {% endif %}
+          
+          ## Resultado
+          {% if (plans_to_scale_up | length > 0) or (plans_to_scale_down | length > 0) %}
+          ✅ Escalado completado exitosamente
+          {% else %}
+          ℹ️  No se requirieron cambios
+          {% endif %}
+        dest: "/tmp/azure_scaling_report_{{ ansible_date_time.epoch }}.txt"
+    
+    - name: Mostrar resumen final
+      debug:
+        msg: |
+          === RESUMEN DE ESCALADO AUTOMÁTICO ===
+          
+          ⏰ Hora: {{ current_hour }}:00 UTC
+          📊 Estado: {{ 'HORARIO LABORAL' if is_business_hours else 'FUERA DE HORARIO' }}
+          
+          {% if is_business_hours and plans_to_scale_up | length > 0 %}
+          ✅ Escalados a {{ working_tier }}: {{ plans_to_scale_up | length }} plan(es)
+          {% elif not is_business_hours and plans_to_scale_down | length > 0 %}
+          ✅ Reducidos a {{ off_hours_tier }}: {{ plans_to_scale_down | length }} plan(es)
+          {% else %}
+          ℹ️  No se requirieron cambios
+          {% endif %}
+          
+          💰 Ahorro estimado: 
+          {% if not is_business_hours and plans_to_scale_down | length > 0 %}
+          ~${{ plans_to_scale_down | length * 13 }}/mes (fuera de horario)
+          {% else %}
+          En horario laboral (servicios activos)
+          {% endif %}
