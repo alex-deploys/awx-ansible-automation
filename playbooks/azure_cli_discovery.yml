@@ -1,0 +1,164 @@
+---
+- name: Azure Resource Discovery con Azure CLI
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    azure_subscription_id: "63865ee1-f50c-40f1-a801-e7332d136dec"
+    azure_tenant_id: "10123fe2-7f32-469c-832a-f0dbd5d898f5"
+    output_dir: "/tmp"
+    timestamp: "{{ ansible_date_time.epoch }}"
+  
+  tasks:
+    - name: Verificar que Azure CLI está disponible
+      command: az version
+      register: az_version
+      changed_when: false
+      
+    - name: Mostrar versión de Azure CLI
+      debug:
+        msg: "Azure CLI disponible: {{ az_version.stdout | from_json }}"
+    
+    - name: Obtener información de la suscripción
+      shell: az account show --output json
+      register: subscription_info
+      changed_when: false
+      
+    - name: Procesar información de suscripción
+      set_fact:
+        current_subscription: "{{ subscription_info.stdout | from_json }}"
+    
+    - name: Mostrar información de suscripción
+      debug:
+        msg: |
+          🔹 Suscripción: {{ current_subscription.name }}
+          🔹 ID: {{ current_subscription.id }}
+          🔹 Tenant: {{ current_subscription.tenantDisplayName }}
+          🔹 Usuario: {{ current_subscription.user.name }}
+    
+    - name: Obtener Resource Groups
+      shell: az group list --output json
+      register: resource_groups_raw
+      changed_when: false
+      
+    - name: Procesar Resource Groups
+      set_fact:
+        resource_groups: "{{ resource_groups_raw.stdout | from_json }}"
+    
+    - name: Mostrar Resource Groups encontrados
+      debug:
+        msg: "📁 Resource Group: {{ item.name }} ({{ item.location }})"
+      loop: "{{ resource_groups }}"
+    
+    - name: Obtener Virtual Machines
+      shell: az vm list --output json
+      register: virtual_machines_raw
+      changed_when: false
+      
+    - name: Procesar Virtual Machines
+      set_fact:
+        virtual_machines: "{{ virtual_machines_raw.stdout | from_json }}"
+    
+    - name: Obtener detalles de VMs (incluyendo IPs)
+      shell: |
+        az vm list-ip-addresses --output json
+      register: vm_ips_raw
+      changed_when: false
+      when: virtual_machines | length > 0
+    
+    - name: Procesar IPs de VMs
+      set_fact:
+        vm_ips: "{{ vm_ips_raw.stdout | from_json }}"
+      when: virtual_machines | length > 0
+    
+    - name: Obtener Storage Accounts
+      shell: az storage account list --output json
+      register: storage_accounts_raw
+      changed_when: false
+      
+    - name: Procesar Storage Accounts
+      set_fact:
+        storage_accounts: "{{ storage_accounts_raw.stdout | from_json }}"
+    
+    - name: Obtener Virtual Networks
+      shell: az network vnet list --output json
+      register: vnets_raw
+      changed_when: false
+      
+    - name: Procesar Virtual Networks
+      set_fact:
+        vnets: "{{ vnets_raw.stdout | from_json }}"
+    
+    - name: Obtener App Services
+      shell: az webapp list --output json
+      register: webapps_raw
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Procesar App Services
+      set_fact:
+        webapps: "{{ webapps_raw.stdout | from_json }}"
+      when: webapps_raw is succeeded
+    
+    - name: Crear resumen de descubrimiento
+      set_fact:
+        discovery_summary:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          subscription_name: "{{ current_subscription.name }}"
+          subscription_id: "{{ current_subscription.id }}"
+          resource_groups_count: "{{ resource_groups | length }}"
+          virtual_machines_count: "{{ virtual_machines | length }}"
+          storage_accounts_count: "{{ storage_accounts | length }}"
+          virtual_networks_count: "{{ vnets | length }}"
+          webapps_count: "{{ webapps | default([]) | length }}"
+    
+    - name: Mostrar resumen del descubrimiento
+      debug:
+        msg: |
+          === DESCUBRIMIENTO AZURE COMPLETADO ===
+          📊 Suscripción: {{ discovery_summary.subscription_name }}
+          📁 Resource Groups: {{ discovery_summary.resource_groups_count }}
+          🖥️  Virtual Machines: {{ discovery_summary.virtual_machines_count }}
+          💾 Storage Accounts: {{ discovery_summary.storage_accounts_count }}
+          🌐 Virtual Networks: {{ discovery_summary.virtual_networks_count }}
+          🌍 Web Apps: {{ discovery_summary.webapps_count }}
+          
+          ⏰ Ejecutado: {{ discovery_summary.timestamp }}
+    
+    # Generar inventario dinámico AWX
+    - name: Crear inventario dinámico para AWX
+      template:
+        src: ../templates/azure_cli_inventory.j2
+        dest: "{{ output_dir }}/azure_inventory_{{ timestamp }}.ini"
+      vars:
+        vms: "{{ virtual_machines }}"
+        vm_ips: "{{ vm_ips | default([]) }}"
+        rgs: "{{ resource_groups }}"
+      delegate_to: localhost
+    
+    - name: Crear reporte JSON completo
+      copy:
+        content: |
+          {
+            "discovery_method": "azure_cli",
+            "summary": {{ discovery_summary | to_nice_json }},
+            "subscription": {{ current_subscription | to_nice_json }},
+            "resource_groups": {{ resource_groups | to_nice_json }},
+            "virtual_machines": {{ virtual_machines | to_nice_json }},
+            "vm_ip_addresses": {{ vm_ips | default([]) | to_nice_json }},
+            "storage_accounts": {{ storage_accounts | to_nice_json }},
+            "virtual_networks": {{ vnets | to_nice_json }},
+            "web_apps": {{ webapps | default([]) | to_nice_json }}
+          }
+        dest: "{{ output_dir }}/azure_discovery_{{ timestamp }}.json"
+    
+    - name: Mostrar archivos generados
+      debug:
+        msg: |
+          📁 ARCHIVOS GENERADOS:
+          
+          📋 Inventario AWX: {{ output_dir }}/azure_inventory_{{ timestamp }}.ini
+          📊 Reporte JSON: {{ output_dir }}/azure_discovery_{{ timestamp }}.json
+          
+          💡 Puedes usar estos archivos para actualizar tu inventario en AWX
+          
+          🔄 Para automatizar: Configura un Schedule en AWX para ejecutar este playbook periódicamente
