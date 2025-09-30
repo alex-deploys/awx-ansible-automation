@@ -13,7 +13,13 @@
     
     - name: Verificar espacio en disco
       debug:
-        msg: "Espacio libre en /: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | filesizeformat }}"
+        msg: "Espacio libre en /: {{ (ansible_mounts | selectattr('mount', 'equalto', '/') | list | first).size_available | filesizeformat }}"
+      when: ansible_mounts | selectattr('mount', 'equalto', '/') | list | length > 0
+    
+    - name: Verificar espacio en disco (alternativo)
+      debug:
+        msg: "No se pudo determinar el espacio en disco para /"
+      when: ansible_mounts | selectattr('mount', 'equalto', '/') | list | length == 0
     
     - name: Crear archivo de ejemplo
       copy:
