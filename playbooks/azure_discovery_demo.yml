@@ -1,0 +1,134 @@
+---
+- name: Azure Resource Discovery (Simulación)
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    # Simulación de recursos para demostración
+    simulated_azure_resources:
+      resource_groups:
+        - name: "rg-produccion"
+          location: "East US"
+        - name: "rg-desarrollo"
+          location: "West Europe"
+        - name: "rg-testing"
+          location: "Central US"
+      
+      virtual_machines:
+        - name: "vm-web-prod-01"
+          resource_group: "rg-produccion"
+          location: "East US"
+          size: "Standard_D2s_v3"
+          state: "running"
+          private_ip: "10.0.1.10"
+        - name: "vm-web-prod-02"
+          resource_group: "rg-produccion"
+          location: "East US"
+          size: "Standard_D2s_v3"
+          state: "running"
+          private_ip: "10.0.1.11"
+        - name: "vm-db-prod-01"
+          resource_group: "rg-produccion"
+          location: "East US"
+          size: "Standard_D4s_v3"
+          state: "running"
+          private_ip: "10.0.2.10"
+        - name: "vm-dev-01"
+          resource_group: "rg-desarrollo"
+          location: "West Europe"
+          size: "Standard_B2s"
+          state: "stopped"
+          private_ip: "10.1.1.10"
+  
+  tasks:
+    - name: Mostrar simulación de descubrimiento Azure
+      debug:
+        msg: |
+          🔍 SIMULANDO DESCUBRIMIENTO DE RECURSOS AZURE
+          
+          Este playbook simula la recopilación de recursos de Azure.
+          Para usar el descubrimiento real, configura las credenciales de Azure.
+    
+    - name: Procesar Resource Groups simulados
+      debug:
+        msg: "📁 Resource Group: {{ item.name }} ({{ item.location }})"
+      loop: "{{ simulated_azure_resources.resource_groups }}"
+    
+    - name: Procesar Virtual Machines simuladas
+      debug:
+        msg: "🖥️  VM: {{ item.name }} [{{ item.size }}] - {{ item.state }} ({{ item.private_ip }})"
+      loop: "{{ simulated_azure_resources.virtual_machines }}"
+    
+    - name: Generar inventario simulado
+      copy:
+        content: |
+          # Azure Simulated Inventory - {{ ansible_date_time.iso8601 }}
+          
+          # Resource Groups
+          [rg_produccion]
+          vm-web-prod-01 ansible_host=10.0.1.10 azure_size=Standard_D2s_v3 azure_state=running
+          vm-web-prod-02 ansible_host=10.0.1.11 azure_size=Standard_D2s_v3 azure_state=running
+          vm-db-prod-01 ansible_host=10.0.2.10 azure_size=Standard_D4s_v3 azure_state=running
+          
+          [rg_desarrollo]
+          vm-dev-01 ansible_host=10.1.1.10 azure_size=Standard_B2s azure_state=stopped
+          
+          # Por estado
+          [azure_running]
+          vm-web-prod-01
+          vm-web-prod-02
+          vm-db-prod-01
+          
+          [azure_stopped]
+          vm-dev-01
+          
+          # Por tamaño
+          [standard_d2s_v3]
+          vm-web-prod-01
+          vm-web-prod-02
+          
+          [standard_d4s_v3]
+          vm-db-prod-01
+          
+          [standard_b2s]
+          vm-dev-01
+          
+          # Todas las VMs
+          [azure_vms:children]
+          rg_produccion
+          rg_desarrollo
+          
+          [azure_vms:vars]
+          ansible_user=azureuser
+          ansible_ssh_common_args=-o StrictHostKeyChecking=no
+        dest: "/tmp/azure_simulated_inventory_{{ ansible_date_time.epoch }}.ini"
+    
+    - name: Crear reporte JSON simulado
+      copy:
+        content: |
+          {
+            "discovery_type": "simulated",
+            "timestamp": "{{ ansible_date_time.iso8601 }}",
+            "summary": {
+              "resource_groups": {{ simulated_azure_resources.resource_groups | length }},
+              "virtual_machines": {{ simulated_azure_resources.virtual_machines | length }},
+              "running_vms": {{ simulated_azure_resources.virtual_machines | selectattr('state', 'equalto', 'running') | list | length }},
+              "stopped_vms": {{ simulated_azure_resources.virtual_machines | selectattr('state', 'equalto', 'stopped') | list | length }}
+            },
+            "resources": {{ simulated_azure_resources | to_nice_json }}
+          }
+        dest: "/tmp/azure_discovery_report_{{ ansible_date_time.epoch }}.json"
+    
+    - name: Mostrar resumen final
+      debug:
+        msg: |
+          === RESUMEN DESCUBRIMIENTO AZURE (SIMULADO) ===
+          📊 Resource Groups: {{ simulated_azure_resources.resource_groups | length }}
+          🖥️  Virtual Machines: {{ simulated_azure_resources.virtual_machines | length }}
+          ✅ VMs en ejecución: {{ simulated_azure_resources.virtual_machines | selectattr('state', 'equalto', 'running') | list | length }}
+          ⏹️  VMs detenidas: {{ simulated_azure_resources.virtual_machines | selectattr('state', 'equalto', 'stopped') | list | length }}
+          
+          📁 Archivos generados:
+          - /tmp/azure_simulated_inventory_{{ ansible_date_time.epoch }}.ini
+          - /tmp/azure_discovery_report_{{ ansible_date_time.epoch }}.json
+          
+          💡 Para usar el descubrimiento real, configura credenciales de Azure en AWX

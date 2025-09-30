@@ -1,0 +1,64 @@
+# Azure Dynamic Inventory - Generado automáticamente
+# Fecha: {{ ansible_date_time.iso8601 }}
+
+# Grupos por Resource Group
+{% for rg in resource_groups %}
+[rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}]
+{% for vm in vms %}
+{% if vm.resource_group == rg.name %}
+{{ vm.name }} ansible_host={{ vm.network_interface_names[0] if vm.network_interface_names else 'no_ip' }} azure_location={{ vm.location }} azure_resource_group={{ vm.resource_group }} azure_vm_size={{ vm.vm_size }}
+{% endif %}
+{% endfor %}
+
+{% endfor %}
+
+# Grupos por Location/Región
+{% for location in vms | map(attribute='location') | unique %}
+[location_{{ location | regex_replace('[^a-zA-Z0-9]', '_') }}]
+{% for vm in vms %}
+{% if vm.location == location %}
+{{ vm.name }}
+{% endif %}
+{% endfor %}
+
+{% endfor %}
+
+# Grupos por tamaño de VM
+{% for size in vms | map(attribute='vm_size') | unique %}
+[size_{{ size | regex_replace('[^a-zA-Z0-9]', '_') }}]
+{% for vm in vms %}
+{% if vm.vm_size == size %}
+{{ vm.name }}
+{% endif %}
+{% endfor %}
+
+{% endfor %}
+
+# Grupos por estado
+[azure_running]
+{% for vm in vms %}
+{% if vm.power_state == 'running' %}
+{{ vm.name }}
+{% endif %}
+{% endfor %}
+
+[azure_stopped]
+{% for vm in vms %}
+{% if vm.power_state != 'running' %}
+{{ vm.name }}
+{% endif %}
+{% endfor %}
+
+# Todas las VMs de Azure
+[azure_vms:children]
+{% for rg in resource_groups %}
+{% if rg.name in vms | map(attribute='resource_group') %}
+rg_{{ rg.name | regex_replace('[^a-zA-Z0-9]', '_') }}
+{% endif %}
+{% endfor %}
+
+# Variables globales para VMs de Azure
+[azure_vms:vars]
+ansible_user=azureuser
+ansible_ssh_common_args=-o StrictHostKeyChecking=no
+azure_managed=true

@@ -1,0 +1,136 @@
+---
+- name: Azure Dynamic Inventory - Recopilación de Recursos
+  hosts: localhost
+  gather_facts: no
+  vars:
+    azure_inventory_file: "/tmp/azure_inventory_{{ ansible_date_time.epoch }}.yml"
+    azure_report_file: "/tmp/azure_resources_report_{{ ansible_date_time.epoch }}.json"
+  
+  tasks:
+    - name: Verificar colecciones de Azure disponibles
+      debug:
+        msg: "Iniciando recopilación de recursos de Azure..."
+    
+    # Obtener todas las suscripciones
+    - name: Obtener información de suscripciones
+      azure.azcollection.azure_rm_subscription_info:
+      register: azure_subscriptions
+      
+    - name: Mostrar suscripciones encontradas
+      debug:
+        msg: "Suscripción: {{ item.display_name }} ({{ item.subscription_id }})"
+      loop: "{{ azure_subscriptions.subscriptions }}"
+    
+    # Obtener Resource Groups
+    - name: Obtener Resource Groups
+      azure.azcollection.azure_rm_resourcegroup_info:
+      register: azure_resource_groups
+      
+    - name: Mostrar Resource Groups
+      debug:
+        msg: "Resource Group: {{ item.name }} ({{ item.location }})"
+      loop: "{{ azure_resource_groups.resourcegroups }}"
+    
+    # Obtener VMs
+    - name: Obtener Virtual Machines
+      azure.azcollection.azure_rm_virtualmachine_info:
+      register: azure_vms
+      
+    # Obtener Storage Accounts
+    - name: Obtener Storage Accounts
+      azure.azcollection.azure_rm_storageaccount_info:
+      register: azure_storage_accounts
+      
+    # Obtener Redes Virtuales
+    - name: Obtener Virtual Networks
+      azure.azcollection.azure_rm_virtualnetwork_info:
+      register: azure_vnets
+      
+    # Obtener App Services
+    - name: Obtener App Services
+      azure.azcollection.azure_rm_webapp_info:
+      register: azure_webapps
+      ignore_errors: yes
+      
+    # Obtener SQL Databases
+    - name: Obtener SQL Servers
+      azure.azcollection.azure_rm_sqlserver_info:
+      register: azure_sql_servers
+      ignore_errors: yes
+      
+    # Obtener AKS Clusters
+    - name: Obtener AKS Clusters
+      azure.azcollection.azure_rm_aks_info:
+      register: azure_aks_clusters
+      ignore_errors: yes
+    
+    # Generar resumen de recursos
+    - name: Crear resumen de recursos Azure
+      set_fact:
+        azure_resources_summary:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          subscription_count: "{{ azure_subscriptions.subscriptions | length }}"
+          resource_groups_count: "{{ azure_resource_groups.resourcegroups | length }}"
+          virtual_machines_count: "{{ azure_vms.vms | length }}"
+          storage_accounts_count: "{{ azure_storage_accounts.storageaccounts | length }}"
+          virtual_networks_count: "{{ azure_vnets.virtualnetworks | length }}"
+          web_apps_count: "{{ azure_webapps.webapps | default([]) | length }}"
+          sql_servers_count: "{{ azure_sql_servers.servers | default([]) | length }}"
+          aks_clusters_count: "{{ azure_aks_clusters.aks | default([]) | length }}"
+          resource_groups: "{{ azure_resource_groups.resourcegroups | map(attribute='name') | list }}"
+          virtual_machines: "{{ azure_vms.vms | map(attribute='name') | list }}"
+    
+    # Mostrar resumen
+    - name: Mostrar resumen de recursos encontrados
+      debug:
+        msg: |
+          === RESUMEN DE RECURSOS AZURE ===
+          🔹 Suscripciones: {{ azure_resources_summary.subscription_count }}
+          🔹 Resource Groups: {{ azure_resources_summary.resource_groups_count }}
+          🔹 Virtual Machines: {{ azure_resources_summary.virtual_machines_count }}
+          🔹 Storage Accounts: {{ azure_resources_summary.storage_accounts_count }}
+          🔹 Virtual Networks: {{ azure_resources_summary.virtual_networks_count }}
+          🔹 Web Apps: {{ azure_resources_summary.web_apps_count }}
+          🔹 SQL Servers: {{ azure_resources_summary.sql_servers_count }}
+          🔹 AKS Clusters: {{ azure_resources_summary.aks_clusters_count }}
+          
+          Timestamp: {{ azure_resources_summary.timestamp }}
+    
+    # Generar inventario dinámico formato AWX
+    - name: Crear inventario dinámico para AWX
+      template:
+        src: azure_inventory_template.yml.j2
+        dest: "{{ azure_inventory_file }}"
+      vars:
+        vms: "{{ azure_vms.vms }}"
+        resource_groups: "{{ azure_resource_groups.resourcegroups }}"
+        vnets: "{{ azure_vnets.virtualnetworks }}"
+      delegate_to: localhost
+      when: azure_vms.vms | length > 0
+    
+    # Guardar reporte completo
+    - name: Guardar reporte completo de recursos
+      copy:
+        content: |
+          {
+            "summary": {{ azure_resources_summary | to_nice_json }},
+            "subscriptions": {{ azure_subscriptions.subscriptions | to_nice_json }},
+            "resource_groups": {{ azure_resource_groups.resourcegroups | to_nice_json }},
+            "virtual_machines": {{ azure_vms.vms | to_nice_json }},
+            "storage_accounts": {{ azure_storage_accounts.storageaccounts | to_nice_json }},
+            "virtual_networks": {{ azure_vnets.virtualnetworks | to_nice_json }},
+            "web_apps": {{ azure_webapps.webapps | default([]) | to_nice_json }},
+            "sql_servers": {{ azure_sql_servers.servers | default([]) | to_nice_json }},
+            "aks_clusters": {{ azure_aks_clusters.aks | default([]) | to_nice_json }}
+          }
+        dest: "{{ azure_report_file }}"
+      delegate_to: localhost
+    
+    - name: Mostrar ubicación de archivos generados
+      debug:
+        msg: |
+          === ARCHIVOS GENERADOS ===
+          📄 Reporte completo: {{ azure_report_file }}
+          📋 Inventario AWX: {{ azure_inventory_file }}
+          
+          Usa estos archivos para actualizar tu inventario en AWX
