@@ -1,0 +1,19 @@
+---
+- name: Ping Simple - Test de Conectividad
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Test de conectividad simple
+      ping:
+      
+    - name: Mostrar mensaje de éxito
+      debug:
+        msg: "¡Conectividad exitosa con {{ inventory_hostname }}!"
+    
+    - name: Obtener fecha y hora actual
+      setup:
+        filter: ansible_date_time
+      
+    - name: Mostrar fecha y hora
+      debug:
+        msg: "Ejecutado el {{ ansible_date_time.date }} a las {{ ansible_date_time.time }}"
