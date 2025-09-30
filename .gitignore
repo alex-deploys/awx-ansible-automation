@@ -1,0 +1,17 @@
+# Directorio de inventarios
+inventory/
+
+# Archivos temporales de Ansible
+*.retry
+
+# Logs
+*.log
+
+# Archivos de respaldo
+*~
+*.backup
+*.bak
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db

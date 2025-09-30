@@ -1,0 +1,35 @@
+---
+- name: Automatización Sencilla - Información del Sistema
+  hosts: all
+  gather_facts: yes
+  tasks:
+    - name: Mostrar información del hostname
+      debug:
+        msg: "El hostname del servidor es: {{ inventory_hostname }}"
+    
+    - name: Mostrar información del sistema operativo
+      debug:
+        msg: "Sistema Operativo: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: Verificar espacio en disco
+      debug:
+        msg: "Espacio libre en /: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | filesizeformat }}"
+    
+    - name: Crear archivo de ejemplo
+      copy:
+        content: |
+          Archivo creado automáticamente por AWX
+          Fecha: {{ ansible_date_time.date }}
+          Hora: {{ ansible_date_time.time }}
+          Servidor: {{ inventory_hostname }}
+        dest: /tmp/awx_automation_test.txt
+        mode: '0644'
+      become: yes
+    
+    - name: Verificar servicios importantes
+      service_facts:
+      
+    - name: Mostrar estado del servicio SSH
+      debug:
+        msg: "SSH está {{ 'activo' if ansible_facts.services['ssh.service']['state'] == 'running' else 'inactivo' }}"
+      when: ansible_facts.services['ssh.service'] is defined
